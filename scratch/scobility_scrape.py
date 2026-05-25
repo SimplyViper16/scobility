@@ -6,7 +6,7 @@ import json
 from datetime import datetime as dt
 from time import sleep
 
-default_tourney = 'itl2024'
+default_tourney = 'itl2026'
 
 def timestamp():
     return dt.utcnow().strftime('%Y%m%d-%H%M%S-%f')[:-3]
@@ -34,11 +34,39 @@ def setup_scrape(tourney: str = default_tourney) -> str:
 
     return path_dst
 
+total_charts = 500
+
 def scrape_charts(path_dst: str, tourney: str = default_tourney):
-    # Chart enumeration query
     charts = {}
+
+    # Step 1: bulk fetch all public charts from the list endpoint
+    try:
+        r = requests.get(f'https://{tourney}.groovestats.com/api/chart/list')
+        j = r.json()
+        if j.get('success', False):
+            for c in j.get('data', []):
+                charts[c['id']] = c
+                logging.info(f"{c['id']:4d} (list): {c.get('artist')} - \"{c.get('title')}\"")
+            logging.info(f"Got {len(charts)} charts from list API.")
+        else:
+            logging.warning(f"Chart list API: {j.get('message', '')} — falling back to ID scan only.")
+    except Exception as e:
+        logging.warning(f"Chart list API failed: {e} — falling back to ID scan only.")
+
+    known_ids = set(charts.keys())
+    hidden_needed = max(0, total_charts - len(charts))
+    logging.info(f"Looking for {hidden_needed} hidden charts (target: {total_charts} total).")
+
+    # Step 2: scan by ID to find hidden charts not returned by the list endpoint,
+    # skipping IDs we already have and stopping once the total target is reached
     strikes = []
     for i in range(10000):
+        if len(charts) >= total_charts:
+            break
+
+        if i in known_ids:
+            continue
+
         sleep(1)
         try:
             r = requests.get(f'https://{tourney}.groovestats.com/api/chart/{i}')
@@ -54,41 +82,36 @@ def scrape_charts(path_dst: str, tourney: str = default_tourney):
         else:
             strikes = []
             charts[i] = j.get('data', {})
-            full_name = f"{charts[i].get('artist')} - \"{charts[i].get('title')}\""
-            logging.info(f'{i:4d}: {full_name}')
+            logging.info(f"{i:4d} (hidden): {charts[i].get('artist')} - \"{charts[i].get('title')}\"")
+
+    logging.info(f"Total charts: {len(charts)} ({len(charts) - len(known_ids)} hidden).")
 
     with open(os.path.join(path_dst, 'charts.json'), 'w', encoding='utf-8') as fp:
         json.dump(charts, fp)
 
 def scrape_entrants(path_dst: str, tourney: str = default_tourney):
     p_entrants = os.path.join(path_dst, 'entrant_info')
-    if not os.path.exists(p_entrants):
-        os.makedirs(p_entrants)
+    os.makedirs(p_entrants, exist_ok=True)
 
-    # Entrant enumeration query
-    entrants = {}
-    strikes = []
-    for i in range(10000):
-        sleep(1)
-        try:
-            r = requests.get(f'https://{tourney}.groovestats.com/api/entrant/{i}')
-            j = r.json()
-        except Exception as e:
-            j = {'success': False, 'message': str(e)}
+    try:
+        r = requests.get(f'https://{tourney}.groovestats.com/api/entrant/leaderboard')
+        j = r.json()
+    except Exception as e:
+        logging.error(f"Leaderboard API failed: {e}")
+        return
 
-        if not j.get('success', False):
-            logging.warning(f"{i:4d}: {j.get('message', '')}")
-            strikes.append(i)
-            if len(strikes) > 20:
-                break
-        else:
-            strikes = []
-            entrants[i] = j.get('data', {})
-            full_name = f"{entrants[i]['entrant']['name']} (ITL #{entrants[i]['entrant']['id']}, GS #{entrants[i]['entrant']['membersId']})"
-            logging.info(f'{i:4d}: {full_name}')
+    if not j.get('success', False):
+        logging.error(f"Leaderboard API: {j.get('message', '')}")
+        return
 
-            with open(os.path.join(p_entrants, f'{i}.json'), 'w', encoding='utf-8') as fp:
-                json.dump(entrants[i], fp)
+    leaderboard = j['data']['leaderboard']
+    logging.info(f"Got {len(leaderboard)} players from leaderboard.")
+
+    for entry in leaderboard:
+        i = entry['id']
+        logging.info(f"{i:4d}: {entry.get('name')} (ITL #{i}, GS #{entry.get('membersId', '?')})")
+        with open(os.path.join(p_entrants, f'{i}.json'), 'w', encoding='utf-8') as fp:
+            json.dump({'entrant': entry}, fp)
 
 def scrape_scores(path_dst: str, tourney: str = default_tourney):
     # Scores query (examine entrants' played songs pages)

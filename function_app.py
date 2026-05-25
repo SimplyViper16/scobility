@@ -7,17 +7,14 @@ from typing import Union, Dict
 
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, TypeAdapter
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from sqlalchemy import create_engine
-from sqlalchemy import insert
-from sqlalchemy import select
-from sqlalchemy import bindparam
-from sqlalchemy import MetaData
+from sqlalchemy import create_engine, insert, select, bindparam, text, MetaData
 from sqlalchemy.engine import URL
 
 import numpy as np
@@ -41,6 +38,12 @@ api = FastAPI(
     root_path="/api"
 )
 
+api.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(","),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 ## Helper functions
 _TOO_MANY_THINGS = 69420
@@ -78,19 +81,18 @@ def soft_int(s: str) -> Union[int, str]:
 # Database connection
 def engine_construct():
     url_construct = URL.create(
-        "mssql+pyodbc",
+        "mysql+pymysql",
         username=os.environ["SCOBILITY_UID"],
         password=os.environ["SCOBILITY_PWD"],
         host=os.environ["SCOBILITY_SERVER"],
         database=os.environ["SCOBILITY_DATABASE"],
-        query={"driver": "ODBC Driver 18 for SQL Server"}
+        port=int(os.environ.get("SCOBILITY_PORT", 3306))
     )
 
     return create_engine(url_construct)
 
 _ENGINE = engine_construct()
 _MD = MetaData()
-_MD.reflect(bind=_ENGINE)
 
 
 _CATALOGS = {}
@@ -103,9 +105,10 @@ _SCORES = {}
 def _cache_catalogs() -> bool:
     if len(_CATALOGS) == 0:
         try:
+            _MD.reflect(bind=_ENGINE)
             with _ENGINE.connect() as connection:
                 result = connection.execute(
-                    select(_MD.tables['Catalog'])
+                    select(_MD.tables['catalog'])
                 )
                 rows = result.all()
                 for row in rows:
@@ -125,8 +128,8 @@ def _cache_spice(catalog_id: int) -> bool:
             # Need to query database and download/cache the spice ratings
             with _ENGINE.connect() as connection:
                 result = connection.execute(
-                    select(_MD.tables['Chart']).where(
-                        _MD.tables['Chart'].c.catalog_id == catalog_id
+                    select(_MD.tables['chart']).where(
+                        _MD.tables['chart'].c.catalog_id == catalog_id
                     )
                 )
                 rows = result.all()
@@ -148,8 +151,8 @@ def _cache_players(catalog_id: int) -> bool:
             # Need to query database and download/cache the scobility info
             with _ENGINE.connect() as connection:
                 result = connection.execute(
-                    select(_MD.tables['Player']).where(
-                        _MD.tables['Player'].c.catalog_id == catalog_id
+                    select(_MD.tables['player']).where(
+                        _MD.tables['player'].c.catalog_id == catalog_id
                     )
                 )
                 rows = result.all()
@@ -181,9 +184,9 @@ def _cache_scores(catalog_id: int, entrant_id: int) -> bool:
             # Need to query database and download/cache the scores
             with _ENGINE.connect() as connection:
                 result = connection.execute(
-                    select(_MD.tables['Score']).where(
-                        _MD.tables['Score'].c.catalog_id == catalog_id,
-                        _MD.tables['Score'].c.performance_id == performance_id
+                    select(_MD.tables['score']).where(
+                        _MD.tables['score'].c.catalog_id == catalog_id,
+                        _MD.tables['score'].c.performance_id == performance_id
                     )
                 )
                 rows = result.all()

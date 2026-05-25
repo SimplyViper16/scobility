@@ -3,6 +3,8 @@
 
 import fetch from "node-fetch";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://scobility-backend.simplyarcade.it";
+
 // Internal spice calculation parameter that also plays a part in
 // achievable score predictions
 const perfect_offset = 1.003
@@ -306,7 +308,7 @@ function no_db_response<T>(): ScobilityDBResponse<T> {
 
 async function loadSpiceData(catalog: string): Promise<ScobilityDBResponse<LoadedChart>> {
   return fetch(
-    `https://scobility.azurewebsites.net/catalog/${catalog}/chart/all/detail/all`
+    `${API_BASE}/catalog/${catalog}/chart/all/detail/all`
   )
     .then((response) => {
       if (!response.ok) {
@@ -329,7 +331,7 @@ async function loadSpiceData(catalog: string): Promise<ScobilityDBResponse<Loade
 }
 
 async function loadPlayerData_test(catalog: string): Promise<ScobilityDBResponse<LoadedPlayer>> {
-  return fetch(`https://scobility.azurewebsites.net/catalog/${catalog}/players`)
+  return fetch(`${API_BASE}/catalog/${catalog}/players`)
     .then((response) => {
       if (!response.ok) {
         throw new Error(response.statusText);
@@ -355,7 +357,7 @@ async function loadScoreData_test(
   player_id: number
 ): Promise<ScobilityDBResponse<LoadedScore>> {
   return fetch(
-    `https://scobility.azurewebsites.net/catalog/${catalog}/score/${player_id}`
+    `${API_BASE}/catalog/${catalog}/score/${player_id}`
   )
     .then((response) => {
       if (!response.ok) {
@@ -864,13 +866,8 @@ function hydrateProcessedScores(
 }
 
 export {
-  loadSpiceData,
-  loadPlayerData_test,
-  loadScoreData_test,
-  transformLoadedScore,
-  filterScores,
-  calculateScobility,
-  hydrateProcessedScores,
-  ScobilityCoefficients,
-  ScobilityStats,
+  calculateScobility, filterScores, hydrateProcessedScores, loadPlayerData_test,
+  loadScoreData_test, loadSpiceData, ScobilityCoefficients,
+  ScobilityStats, transformLoadedScore
 };
+
