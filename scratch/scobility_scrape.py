@@ -3,6 +3,7 @@ import glob
 import logging
 import os
 import json
+import sys
 from datetime import datetime as dt
 from time import sleep
 
@@ -198,11 +199,12 @@ def scrape_scores(path_dst: str, tourney: str = default_tourney):
 
 if __name__ == '__main__':
     only_scores = False
+    tourney = sys.argv[1] if len(sys.argv) > 1 else default_tourney
 
-    path_dst = setup_scrape()
+    path_dst = setup_scrape(tourney)
     if not only_scores:
-        scrape_charts(path_dst)
-        scrape_entrants(path_dst)
-    scrape_scores(path_dst)
- 
+        scrape_charts(path_dst, tourney)
+        scrape_entrants(path_dst, tourney)
+    scrape_scores(path_dst, tourney)
+
     logging.info('Done!')

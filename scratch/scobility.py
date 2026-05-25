@@ -1326,7 +1326,7 @@ def process(src='itl2024', force_recalculate_spice: bool = False):
                 tourney.view_spice_ranking(style=style, fp=fp)
 
         # Store (and re-load?)
-        tourney_fn = f'scobility_{src}{scrape_designator}.json'
+        tourney_fn = f'scobility_{src}.json'
         with open(tourney_fn, 'w') as fp:
             json.dump(tourney.dump(), fp, indent='\t')
         print('========================================================================')
@@ -1368,7 +1368,7 @@ def process(src='itl2024', force_recalculate_spice: bool = False):
     print('=== Done!')
     
     # Store (and re-load?)
-    tourney_fn = f'scobility_{src}{scrape_designator}.json'
+    tourney_fn = f'scobility_{src}.json'
     with open(tourney_fn, 'w') as fp:
         json.dump(tourney.dump(), fp, indent='\t')
 
