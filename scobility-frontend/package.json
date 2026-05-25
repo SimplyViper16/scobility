@@ -6,9 +6,9 @@
   },
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 56591",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --port 56591",
     "lint": "next lint"
   },
   "dependencies": {

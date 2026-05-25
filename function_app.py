@@ -38,12 +38,12 @@ api = FastAPI(
     root_path="/api"
 )
 
-api.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# api.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(","),
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 ## Helper functions
 _TOO_MANY_THINGS = 69420
