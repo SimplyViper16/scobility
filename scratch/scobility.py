@@ -874,7 +874,6 @@ class Tournament:
         convergence = [np.log2(spice_list[-1])]
 
         for k in range(Tournament.ITERATIONS_SCOBILITY_SORT):
-            ordering_prev = [v for v in refined_ordering]
             spice_prev = [v for v in spice_list]
             for i, song in enumerate(refined_ordering):
                 # Snip out the spice influence window.

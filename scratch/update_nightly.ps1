@@ -23,7 +23,7 @@ python -c "import scobility; scobility.process(src='$tourney')"
 if ($LASTEXITCODE -ne 0) { Log "ERROR: process failed (exit $LASTEXITCODE)"; exit $LASTEXITCODE }
 
 Log "Step 3: Uploading to DB..."
-python db_upload.py $tourneyUpper "..\scobility_$tourney.json"
+python db_upload.py $tourneyUpper "scobility_$tourney.json"
 if ($LASTEXITCODE -ne 0) { Log "ERROR: db_upload failed (exit $LASTEXITCODE)"; exit $LASTEXITCODE }
 
 Log "=== Done! ==="

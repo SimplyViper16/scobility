@@ -4,6 +4,8 @@ import logging
 import os
 import json
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime as dt
 from time import sleep
 
@@ -37,7 +39,7 @@ def setup_scrape(tourney: str = default_tourney) -> str:
 
 total_charts = 500
 
-def scrape_charts(path_dst: str, tourney: str = default_tourney):
+def scrape_charts(path_dst: str, tourney: str = default_tourney, workers: int = 20):
     charts = {}
 
     # Step 1: bulk fetch all public charts from the list endpoint
@@ -54,36 +56,28 @@ def scrape_charts(path_dst: str, tourney: str = default_tourney):
     except Exception as e:
         logging.warning(f"Chart list API failed: {e} — falling back to ID scan only.")
 
+    # Step 2: scan the gaps between known IDs concurrently.
+    # Hidden charts must live in [1, max_known_id + buffer] — no need to scan 0-10000.
     known_ids = set(charts.keys())
-    hidden_needed = max(0, total_charts - len(charts))
-    logging.info(f"Looking for {hidden_needed} hidden charts (target: {total_charts} total).")
+    scan_ceiling = max(known_ids, default=0) + 50
+    ids_to_scan = [i for i in range(1, scan_ceiling + 1) if i not in known_ids]
+    logging.info(f"Scanning {len(ids_to_scan)} gap IDs for hidden charts (workers={workers})...")
 
-    # Step 2: scan by ID to find hidden charts not returned by the list endpoint,
-    # skipping IDs we already have and stopping once the total target is reached
-    strikes = []
-    for i in range(10000):
-        if len(charts) >= total_charts:
-            break
-
-        if i in known_ids:
-            continue
-
-        sleep(1)
+    def fetch_chart(i):
         try:
             r = requests.get(f'https://{tourney}.groovestats.com/api/chart/{i}')
             j = r.json()
-        except Exception as e:
-            j = {'success': False, 'message': str(e)}
+            if j.get('success', False):
+                return i, j.get('data', {})
+        except Exception:
+            pass
+        return i, None
 
-        if not j.get('success', False):
-            logging.warning(f"{i:4d}: {j.get('message', '')}")
-            strikes.append(i)
-            if len(strikes) > 100:
-                break
-        else:
-            strikes = []
-            charts[i] = j.get('data', {})
-            logging.info(f"{i:4d} (hidden): {charts[i].get('artist')} - \"{charts[i].get('title')}\"")
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        for i, data in executor.map(fetch_chart, ids_to_scan):
+            if data is not None:
+                charts[i] = data
+                logging.info(f"{i:4d} (hidden): {data.get('artist')} - \"{data.get('title')}\"")
 
     logging.info(f"Total charts: {len(charts)} ({len(charts) - len(known_ids)} hidden).")
 
@@ -114,22 +108,16 @@ def scrape_entrants(path_dst: str, tourney: str = default_tourney):
         with open(os.path.join(p_entrants, f'{i}.json'), 'w', encoding='utf-8') as fp:
             json.dump({'entrant': entry}, fp)
 
-def scrape_scores(path_dst: str, tourney: str = default_tourney):
-    # Scores query (examine entrants' played songs pages)
+def scrape_scores(path_dst: str, tourney: str = default_tourney, workers: int = 10):
     p_scores = os.path.join(path_dst, 'song_scores')
-    if not os.path.exists(p_scores):
-        os.makedirs(p_scores)
+    os.makedirs(p_scores, exist_ok=True)
 
     charts_json_src = os.path.join(path_dst, 'charts.json')
     if not os.path.exists(charts_json_src):
         one_level_up = os.path.split(path_dst)[0]
-        charts_json_src_options = [
-            os.path.join(one_level_up, fn, "charts.json")
-            for fn in os.listdir(one_level_up)
-        ]
         charts_json_src_options = sorted([
             (os.path.getctime(fn), fn)
-            for fn in charts_json_src_options
+            for fn in [os.path.join(one_level_up, fn, 'charts.json') for fn in os.listdir(one_level_up)]
             if os.path.exists(fn)
         ], key=lambda v: -v[0])
         charts_json_src = charts_json_src_options[0][1]
@@ -138,61 +126,62 @@ def scrape_scores(path_dst: str, tourney: str = default_tourney):
     with open(charts_json_src, 'r', encoding='utf-8') as fp:
         charts = json.load(fp)
 
-    # Entrant's played songs pages query
-    scores = {}
-    strikes = []
-    total = 0
-    for c in charts.values():
-        total += 1
-        if total > 10000:
-            break
+    abort = threading.Event()
+    fails_lock = threading.Lock()
+    fail_count = [0]
 
+    def fetch_scores(c):
+        if abort.is_set():
+            return
         i = c.get('id', 0)
-
-        for retries in range(5):
-            sleep(1)
+        j = {'success': False, 'message': 'No attempt made'}
+        r = None
+        for attempt in range(5):
             try:
                 r = requests.post(
                     f'https://{tourney}.groovestats.com/api/score/chartTopScores',
                     data={'chartHash': c['hash']}
                 )
-                if r.status_code > 400:
+                if r.status_code >= 400:
+                    sleep(2 ** attempt)
                     continue
                 j = r.json()
                 break
             except Exception as e:
-                r = None
                 j = {'success': False, 'message': str(e)}
-        if r is None or r.status_code > 400:
-            logging.error('Couldn\'t retrieve scores for #{i}\n{r}')
+                sleep(2 ** attempt)
 
         if not j.get('success', False):
             logging.warning(f"{i:4d} (hash {c['hash']}): {j.get('message', '')}")
-            strikes.append(i)
-            if len(strikes) > 20:
-                break
-        else:
-            strikes = []
-            full_name = f"{c.get('artist')} - \"{c.get('title')}\""
-            scores[i] = j.get('data', {}).get('leaderboard', {})
-            for s in scores[i]:
-                s['chartId'] = i
-            logging.info(f"{i:4d} (hash {c['hash']}): {full_name}, {len(scores[i])} scores")
+            with fails_lock:
+                fail_count[0] += 1
+                if fail_count[0] > 20:
+                    abort.set()
+            return
 
-            with open(os.path.join(p_scores, f'{i}.json'), 'w', encoding='utf-8') as fp:
-                json.dump({'scores': scores[i]}, fp)
+        with fails_lock:
+            fail_count[0] = 0
 
-    # Reorganize scores into individual JSON files per chart
+        chart_scores = j.get('data', {}).get('leaderboard', [])
+        for s in chart_scores:
+            s['chartId'] = i
+        full_name = f"{c.get('artist')} - \"{c.get('title')}\""
+        logging.info(f"{i:4d} (hash {c['hash']}): {full_name}, {len(chart_scores)} scores")
+
+        with open(os.path.join(p_scores, f'{i}.json'), 'w', encoding='utf-8') as fp:
+            json.dump({'scores': chart_scores}, fp)
+
+    chart_list = list(charts.values())[:10000]
+    logging.info(f"Fetching scores for {len(chart_list)} charts (workers={workers})...")
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        list(executor.map(fetch_scores, chart_list))
+
+    # Write individual song info files
     p_charts = os.path.join(path_dst, 'song_info')
-    if not os.path.exists(p_charts):
-        os.makedirs(p_charts)
-
+    os.makedirs(p_charts, exist_ok=True)
     for c in charts.values():
         i = c.get('id', 0)
-        
-        full_name = f"{c.get('artist')} - \"{c.get('title')}\""
-        logging.info(f"{i:4d} (hash {c['hash']}): {full_name}")
-
+        logging.info(f"{i:4d} (hash {c['hash']}): {c.get('artist')} - \"{c.get('title')}\"")
         with open(os.path.join(p_charts, f'{i}.json'), 'w', encoding='utf-8') as fp:
             json.dump({'song': c}, fp)
 
