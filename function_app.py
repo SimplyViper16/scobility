@@ -40,7 +40,7 @@ api = FastAPI(
 
 api.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "https://scobility-backend.simplyarcade.it").split(","),
+    allow_origins=os.environ.get("CORS_ORIGINS", "https://scobility.simplyarcade.it").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
